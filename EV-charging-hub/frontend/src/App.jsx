@@ -13,7 +13,7 @@ import UserDashboard from './pages/UserDashboard';
 const ProtectedRoute = ({ children, roles = [] }) => {
   const { user, loading } = useAuth();
 
-  if (loading) return <div className="h-screen flex items-center justify-center bg-slate-950 text-primary-500">Loading VoltHub...</div>;
+  if (loading) return <div className="h-screen flex items-center justify-center app-surface text-primary-300">Loading VoltHub...</div>;
   if (!user) return <Navigate to="/login" />;
   if (roles.length > 0 && !roles.includes(user.role)) return <Navigate to="/" />;
 
@@ -22,7 +22,7 @@ const ProtectedRoute = ({ children, roles = [] }) => {
 
 const App = () => {
   return (
-    <div className="min-h-screen bg-[#020617] text-slate-200">
+    <div className="min-h-screen app-surface text-slate-200">
       <Navbar />
       <Routes>
         <Route path="/" element={<LandingPage />} />

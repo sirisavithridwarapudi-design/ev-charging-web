@@ -38,14 +38,37 @@ const createStationIcon = (color, isSelected = false) => L.divIcon({
     iconAnchor: [16, 16],
 });
 
+const hasValidCoordinates = (station) => {
+    const coordinates = station?.location?.coordinates;
+    return Array.isArray(coordinates)
+        && coordinates.length >= 2
+        && Number.isFinite(Number(coordinates[0]))
+        && Number.isFinite(Number(coordinates[1]));
+};
+
+const getMarkerPosition = (station, visibleStations) => {
+    const [longitude, latitude] = station.location.coordinates.map(Number);
+    const matchingStations = visibleStations.filter(other => (
+        other.location.coordinates[0] === station.location.coordinates[0]
+        && other.location.coordinates[1] === station.location.coordinates[1]
+    ));
+
+    if (matchingStations.length === 1) return [latitude, longitude];
+
+    const duplicateIndex = matchingStations.findIndex(other => other._id === station._id);
+    const angle = (duplicateIndex / matchingStations.length) * Math.PI * 2;
+    const spread = 0.0007;
+    return [latitude + Math.cos(angle) * spread, longitude + Math.sin(angle) * spread];
+};
+
 const MapDiscovery = () => {
     const [stations, setStations] = useState([]);
     const [userLocation, setUserLocation] = useState([51.505, -0.09]);
     const [selectedStation, setSelectedStation] = useState(null);
     const [prediction, setPrediction] = useState(null);
     const [loadingPrediction, setLoadingPrediction] = useState(false);
-    const [radius, setRadius] = useState(10000);
-    const [filters, setFilters] = useState({ type: '', status: 'approved', maxPrice: 2, minPower: 0 });
+    const [radius, setRadius] = useState(20000);
+    const [filters, setFilters] = useState({ type: '', status: 'approved', maxPrice: 100, minPower: 0 });
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [showHeatmap, setShowHeatmap] = useState(false);
     const [userFavorites, setUserFavorites] = useState([]);
@@ -55,6 +78,7 @@ const MapDiscovery = () => {
     const { user } = useAuth();
     const navigate = useNavigate();
     const locationState = useLocation().state;
+    const routeStation = locationState?.selectedStation;
 
     useEffect(() => {
         if (locationState?.center) {
@@ -73,7 +97,7 @@ const MapDiscovery = () => {
 
     useEffect(() => {
         fetchStations();
-    }, [userLocation, radius, filters]);
+    }, [userLocation[0], userLocation[1], radius, filters.type, filters.status, filters.maxPrice, filters.minPower, routeStation?._id]);
 
     useEffect(() => {
         if (selectedStation) fetchReviews(selectedStation._id);
@@ -100,7 +124,13 @@ const MapDiscovery = () => {
     const fetchStations = async () => {
         try {
             const { data } = await axios.get(`http://localhost:5000/api/stations?lat=${userLocation[0]}&lng=${userLocation[1]}&radius=${radius}&type=${filters.type}&status=${filters.status}&maxPrice=${filters.maxPrice}&minPower=${filters.minPower}`);
-            setStations(data);
+            const nearbyStations = Array.isArray(data) ? data : [];
+            // Keep an owner-selected pending station visible when arriving from Station Management.
+            if (hasValidCoordinates(routeStation) && !nearbyStations.some(station => station._id === routeStation._id)) {
+                setStations([routeStation, ...nearbyStations]);
+            } else {
+                setStations(nearbyStations);
+            }
         } catch (error) { console.error("Error fetching stations"); }
     };
 
@@ -150,6 +180,8 @@ const MapDiscovery = () => {
         }
     };
 
+    const visibleStations = stations.filter(hasValidCoordinates);
+
     return (
         <div className="h-screen w-full pt-16 flex relative overflow-hidden bg-slate-950">
             <motion.aside
@@ -196,7 +228,7 @@ const MapDiscovery = () => {
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Max Price (${filters.maxPrice})</label>
-                                <input type="range" min="0.1" max="5" step="0.1" value={filters.maxPrice} onChange={(e) => setFilters({ ...filters, maxPrice: e.target.value })} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-primary-500" />
+                                <input type="range" min="0.1" max="100" step="0.1" value={filters.maxPrice} onChange={(e) => setFilters({ ...filters, maxPrice: e.target.value })} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-primary-500" />
                             </div>
                             <div>
                                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Min Power ({filters.minPower}kW)</label>
@@ -258,14 +290,14 @@ const MapDiscovery = () => {
                     <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
                     <Circle center={userLocation} radius={radius} pathOptions={{ color: '#0ea5e9', fillOpacity: 0.1, weight: 1 }} />
 
-                    {showHeatmap && stations.map(s => !s.isAvailable && (
+                    {showHeatmap && visibleStations.map(s => !s.isAvailable && (
                         <Circle key={`h-${s._id}`} center={[s.location.coordinates[1], s.location.coordinates[0]]} radius={800} pathOptions={{ color: '#f97316', fillColor: '#f97316', fillOpacity: 0.3, weight: 0 }} />
                     ))}
 
-                    {stations.map((s) => (
+                    {visibleStations.map((s) => (
                         <Marker
                             key={s._id}
-                            position={[s.location.coordinates[1], s.location.coordinates[0]]}
+                            position={getMarkerPosition(s, visibleStations)}
                             icon={createStationIcon(s.isAvailable ? 'primary' : 'emerald', selectedStation?._id === s._id)}
                             zIndexOffset={selectedStation?._id === s._id ? 1000 : 0}
                             eventHandlers={{ click: () => setSelectedStation(s) }}

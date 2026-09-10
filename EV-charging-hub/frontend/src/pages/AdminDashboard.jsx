@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { motion } from 'framer-motion';
-import { ShieldCheck, Users, MapPin, Check, X, AlertCircle, BarChart, Settings, Trash2 } from 'lucide-react';
+import { ShieldCheck, Users, MapPin, Check, X, AlertCircle, BarChart, Settings, Trash2, Save, Pencil } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const AdminDashboard = () => {
     const [stats, setStats] = useState(null);
     const [pendingStations, setPendingStations] = useState([]);
+    const [allStations, setAllStations] = useState([]);
     const [users, setUsers] = useState([]);
     const [activeTab, setActiveTab] = useState('moderation');
+    const [editingStation, setEditingStation] = useState(null);
+    const [editForm, setEditForm] = useState(null);
     const { user } = useAuth();
 
     useEffect(() => {
@@ -18,13 +21,15 @@ const AdminDashboard = () => {
     const fetchData = async () => {
         try {
             const authHeader = { headers: { Authorization: `Bearer ${user.token}` } };
-            const [statsRes, stationsRes, usersRes] = await Promise.all([
+            const [statsRes, stationsRes, allStationsRes, usersRes] = await Promise.all([
                 axios.get('http://localhost:5000/api/admin/stats', authHeader),
                 axios.get('http://localhost:5000/api/stations?status=pending', authHeader),
+                axios.get('http://localhost:5000/api/stations', authHeader),
                 axios.get('http://localhost:5000/api/admin/users', authHeader)
             ]);
             setStats(statsRes.data);
             setPendingStations(stationsRes.data);
+            setAllStations(allStationsRes.data);
             setUsers(usersRes.data);
         } catch (error) {
             console.error("Admin Fetch Error");
@@ -39,6 +44,42 @@ const AdminDashboard = () => {
             fetchData();
         } catch (error) {
             alert("Moderation failed");
+        }
+    };
+
+    const openStationEditor = (station) => {
+        setEditingStation(station);
+        setEditForm({
+            name: station.name || '',
+            address: station.address || '',
+            lat: station.location?.coordinates?.[1] ?? '',
+            lng: station.location?.coordinates?.[0] ?? '',
+            chargerTypes: station.chargerTypes || [],
+            powerRating: station.powerRating ?? '',
+            pricing: station.pricing ?? '',
+            timings: station.timings || '',
+            connectorsCount: station.connectorsCount ?? '',
+        });
+    };
+
+    const saveStation = async (event) => {
+        event.preventDefault();
+        try {
+            await axios.put(`http://localhost:5000/api/stations/${editingStation._id}`, {
+                name: editForm.name,
+                address: editForm.address,
+                location: { type: 'Point', coordinates: [parseFloat(editForm.lng), parseFloat(editForm.lat)] },
+                chargerTypes: editForm.chargerTypes,
+                powerRating: parseFloat(editForm.powerRating),
+                pricing: parseFloat(editForm.pricing),
+                timings: editForm.timings,
+                connectorsCount: parseInt(editForm.connectorsCount, 10),
+            }, { headers: { Authorization: `Bearer ${user.token}` } });
+            setEditingStation(null);
+            setEditForm(null);
+            fetchData();
+        } catch (error) {
+            alert(error.response?.data?.message || 'Station update failed');
         }
     };
 
@@ -140,7 +181,7 @@ const AdminDashboard = () => {
                                         >
                                             <X size={20} />
                                         </button>
-                                        <button className="p-3 bg-slate-800 text-slate-400 rounded-xl">
+                                        <button onClick={() => openStationEditor(station)} className="p-3 bg-slate-800 text-slate-400 rounded-xl hover:bg-primary-500/20 hover:text-primary-300 transition-colors" title="Edit station">
                                             <Settings size={20} />
                                         </button>
                                     </div>
@@ -152,6 +193,30 @@ const AdminDashboard = () => {
                                     <p className="text-slate-500 font-medium">All clear! No pending station listings.</p>
                                 </div>
                             )}
+                        </div>
+
+                        <div className="mt-12">
+                            <div className="flex items-center justify-between mb-4">
+                                <div>
+                                    <h2 className="text-xl font-bold">All Stations</h2>
+                                    <p className="text-sm text-slate-500">Edit any station, including approved listings.</p>
+                                </div>
+                                <span className="text-xs text-slate-500">{allStations.length} total</span>
+                            </div>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                {allStations.map(station => (
+                                    <div key={station._id} className="glass-card flex items-center justify-between gap-4">
+                                        <div className="min-w-0">
+                                            <h3 className="font-bold truncate">{station.name}</h3>
+                                            <p className="text-xs text-slate-500 truncate">{station.address}</p>
+                                            <span className={`inline-block mt-2 text-[10px] font-bold uppercase ${station.status === 'approved' ? 'text-emerald-400' : station.status === 'pending' ? 'text-primary-300' : 'text-red-400'}`}>{station.status}</span>
+                                        </div>
+                                        <button onClick={() => openStationEditor(station)} className="btn-secondary shrink-0 py-2 px-3 text-xs" title={`Edit ${station.name}`}>
+                                            <Pencil size={14} /> Edit
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 )}
@@ -222,6 +287,62 @@ const AdminDashboard = () => {
                                 </div>
                             </div>
                         </div>
+                    </div>
+                )}
+
+                {editingStation && editForm && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+                        <motion.form
+                            initial={{ opacity: 0, y: 18, scale: .98 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            onSubmit={saveStation}
+                            className="glass-card w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+                        >
+                            <div className="flex items-center justify-between mb-6">
+                                <div>
+                                    <p className="text-xs uppercase tracking-widest text-primary-400 font-bold">Station controls</p>
+                                    <h2 className="text-2xl font-bold mt-1">Edit {editingStation.name}</h2>
+                                </div>
+                                <button type="button" onClick={() => { setEditingStation(null); setEditForm(null); }} className="text-slate-400 hover:text-white"><X size={22} /></button>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {[
+                                    ['name', 'Station name', 'text'],
+                                    ['address', 'Address', 'text'],
+                                    ['lat', 'Latitude', 'number'],
+                                    ['lng', 'Longitude', 'number'],
+                                    ['powerRating', 'Power rating (kW)', 'number'],
+                                    ['pricing', 'Price per kWh', 'number'],
+                                    ['timings', 'Timings', 'text'],
+                                    ['connectorsCount', 'Connector count', 'number'],
+                                ].map(([field, label, type]) => (
+                                    <label key={field} className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                                        {label}
+                                        <input
+                                            required
+                                            type={type}
+                                            step={type === 'number' ? 'any' : undefined}
+                                            value={editForm[field]}
+                                            onChange={(event) => setEditForm({ ...editForm, [field]: event.target.value })}
+                                            className="input-field mt-2 normal-case tracking-normal font-normal"
+                                        />
+                                    </label>
+                                ))}
+                            </div>
+                            <div className="mt-5">
+                                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-3">Charger types</p>
+                                <div className="flex flex-wrap gap-2">
+                                    {['AC', 'DC', 'Type2', 'CCS', 'CHAdeMO'].map(type => {
+                                        const selected = editForm.chargerTypes.includes(type);
+                                        return <button key={type} type="button" onClick={() => setEditForm({ ...editForm, chargerTypes: selected ? editForm.chargerTypes.filter(item => item !== type) : [...editForm.chargerTypes, type] })} className={`px-3 py-2 rounded-lg text-xs font-bold border transition-colors ${selected ? 'bg-primary-500/20 border-primary-400 text-primary-300' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>{type}</button>;
+                                    })}
+                                </div>
+                            </div>
+                            <div className="flex justify-end gap-3 mt-8">
+                                <button type="button" onClick={() => { setEditingStation(null); setEditForm(null); }} className="btn-secondary">Cancel</button>
+                                <button type="submit" className="btn-primary"><Save size={17} /> Save changes</button>
+                            </div>
+                        </motion.form>
                     </div>
                 )}
             </div>
